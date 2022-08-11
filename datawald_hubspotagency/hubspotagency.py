@@ -30,7 +30,7 @@ class HubspotAgency(Agency):
         for transaction in transactions:
             tx_type = transaction.get("tx_type_src_id").split("-")[0]
             try:
-                if tx_type == "deal":
+                if tx_type == "opportunity":
                     transaction["tgt_id"] = self.hubspot_connector.insert_update_deal(
                         transaction["data"],
                         id_property=self.setting["id_property"][tx_type],
