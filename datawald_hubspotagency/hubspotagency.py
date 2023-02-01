@@ -30,11 +30,10 @@ class HubspotAgency(Agency):
         for transaction in transactions:
             tx_type = transaction.get("tx_type_src_id").split("-")[0]
             try:
-                if tx_type == "opportunity":
-                    transaction["tgt_id"] = self.hubspot_connector.insert_update_deal(
-                        transaction["data"],
-                        id_property=self.setting["id_property"][tx_type],
-                    )
+                if tx_type== "opportunity":
+                    transaction["tgt_id"] = self.insert_update_opportunity(transaction)
+                elif tx_type == "order":
+                    transaction["tgt_id"] = self.insert_update_order(transaction)
                 else:
                     raise Exception(f"{tx_type} is not supported.")
                 transaction["tx_status"] = "S"
@@ -99,3 +98,95 @@ class HubspotAgency(Agency):
                     f"Failed to create asset: {asset['tx_type_src_id']} with error: {log}"
                 )
         return assets
+    
+    def insert_update_order(self, transaction):
+        tx_type = transaction.get("tx_type_src_id").split("-")[0]
+        items = transaction["data"].pop("items", [])
+        so_number = transaction["data"].get("so_number")
+        if len(items) == 0:
+            raise Exception(f"{so_number} does not have items")
+
+        hs_products = []
+        for item in items:
+            try:
+                hs_product = self.hubspot_connector.get_product(item.get("sku", None), self.setting["id_property"]["product"])
+                if hs_product is not None:
+                    hs_products.append({
+                        "hs_product": hs_product,
+                        "quantity": item.get("qty_ordered"),
+                        "price": item.get("price")
+                    })
+            except Exception as e:
+                self.logger.info(f"can't find product: field/{self.setting['id_property']['product']} value/{item['sku']}")
+                pass
+        if len(hs_products) == 0:
+            raise Exception(f"{so_number} does not have avaliable items")
+
+        company_id = transaction["data"].pop("company_id", None)
+        deal_id = self.hubspot_connector.insert_update_deal(
+            transaction["data"],
+            id_property=self.setting["id_property"][tx_type],
+        )
+        if deal_id is None:
+            raise Exception(f"Fail to create deal. so_number:{so_number}")
+
+        if company_id is not None and deal_id:
+            try:
+                company = self.hubspot_connector.get_company(company_id, self.setting["id_property"]["company"])
+                company_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="company")
+                if len(company_association.results) == 0:
+                    self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company.id)
+                    
+            except Exception as e:
+                self.logger.info(str(e))
+                pass
+        if transaction["data"].get("associated_email_contact"):
+            try:
+                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"])
+                contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
+                if len(contact_association.results) == 0:
+                    self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
+            except Exception as e:
+                self.logger.info(str(e))
+                pass
+            
+        line_items_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="line_items")
+        if len(line_items_association.results) == 0 and deal_id:
+            for item in hs_products:
+                line_item_id = self.hubspot_connector.insert_update_line_item(hs_product=item["hs_product"], quantity=item["quantity"], price=item["price"], associations=["deals"])
+                self.hubspot_connector.associate_line_item_deal(line_item_id, deal_id)
+        return deal_id
+
+    def insert_update_opportunity(self, transaction):
+        tx_type = transaction.get("tx_type_src_id").split("-")[0]
+        items = transaction["data"].pop("items", [])
+        document_number = transaction["data"].get("document_number")
+        hs_products = []
+        for item in items:
+            try:
+                hs_product = self.hubspot_connector.get_product(item.get("sku", None), self.setting["id_property"]["product"])
+                if hs_product is not None:
+                    hs_products.append({
+                        "hs_product": hs_product,
+                        "quantity": item.get("qty_ordered"),
+                        "price": item.get("price")
+                    })
+            except Exception as e:
+                self.logger.info(f"can't find product: field/{self.setting['id_property']['product']} value/{item['sku']}")
+                pass
+
+        deal_id = self.hubspot_connector.insert_update_deal(
+            transaction["data"],
+            id_property=self.setting["id_property"][tx_type],
+        )
+        if deal_id is None:
+             raise Exception(f"Fail to create deal. document_number:{document_number}")
+        
+        line_items_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="line_items")
+        if len(line_items_association.results) == 0 and deal_id:
+            for item in hs_products:
+                line_item_id = self.hubspot_connector.insert_update_line_item(hs_product=item["hs_product"], quantity=item["quantity"], price=item["price"], associations=["deals"])
+                self.hubspot_connector.associate_line_item_deal(line_item_id, deal_id)
+        return deal_id
+
+
