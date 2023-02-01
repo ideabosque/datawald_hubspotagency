@@ -19,6 +19,8 @@ class HubspotAgency(Agency):
         self.hubspot_connector = HubspotConnector(logger, setting)
         self.datawald = DatawaldConnector(logger, **setting)
         Agency.__init__(self, logger, datawald=self.datawald)
+        if setting.get("tx_type"):
+            Agency.tx_type = setting.get("tx_type")
 
     def tx_transaction_tgt(self, transaction):
         return transaction
