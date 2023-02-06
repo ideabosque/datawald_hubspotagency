@@ -104,12 +104,12 @@ class HubspotAgency(Agency):
     def insert_update_order(self, transaction):
         tx_type = transaction.get("tx_type_src_id").split("-")[0]
         items = transaction["data"].pop("items", [])
-        so_number = transaction["data"].get("so_number")
+        deal_number = transaction["data"].get("deal_number")
         order_status = transaction["data"].pop("status", "")
         if order_status != "Billed":
-            raise Exception(f"{so_number}'s status is not Billed, can not be synced to hubspot.")
+            raise Exception(f"{deal_number}'s status is not Billed, can not be synced to hubspot.")
         if len(items) == 0:
-            raise Exception(f"{so_number} does not have items")
+            raise Exception(f"{deal_number} does not have items")
 
         hs_products = []
         for item in items:
@@ -125,7 +125,7 @@ class HubspotAgency(Agency):
                 self.logger.info(f"can't find product: field/{self.setting['id_property']['product']} value/{item['sku']}")
                 pass
         if len(hs_products) == 0:
-            raise Exception(f"{so_number} does not have avaliable items")
+            raise Exception(f"{deal_number} does not have avaliable items")
 
         company_id = transaction["data"].pop("company_id", None)
         deal_id = self.hubspot_connector.insert_update_deal(
@@ -133,7 +133,7 @@ class HubspotAgency(Agency):
             id_property=self.setting["id_property"][tx_type],
         )
         if deal_id is None:
-            raise Exception(f"Fail to create deal. so_number:{so_number}")
+            raise Exception(f"Fail to create deal. deal_number:{deal_number}")
 
         if company_id is not None and deal_id:
             try:
