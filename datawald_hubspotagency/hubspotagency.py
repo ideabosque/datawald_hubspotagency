@@ -105,6 +105,9 @@ class HubspotAgency(Agency):
         tx_type = transaction.get("tx_type_src_id").split("-")[0]
         items = transaction["data"].pop("items", [])
         so_number = transaction["data"].get("so_number")
+        order_status = transaction["data"].pop("status", "")
+        if order_status != "Billed":
+            raise Exception(f"{so_number}'s status is not Billed, can not be synced to hubspot.")
         if len(items) == 0:
             raise Exception(f"{so_number} does not have items")
 
