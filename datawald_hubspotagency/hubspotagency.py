@@ -13,6 +13,8 @@ from pytz import timezone
 
 
 class HubspotAgency(Agency):
+    all_owners = {}
+
     def __init__(self, logger, **setting):
         self.logger = logger
         self.setting = setting
@@ -23,8 +25,13 @@ class HubspotAgency(Agency):
             Agency.tx_type = setting.get("tx_type")
 
     def tx_transaction_tgt(self, transaction):
+        if transaction["data"].get("owner_name", None):
+            owner_name = transaction["data"].pop("owner_name", None)
+            owner = self.get_owner_by_name(owner_name)
+            if owner is not None:
+                transaction["data"]["hubspot_owner_id"] = owner.id
         return transaction
-
+    
     def tx_transaction_tgt_ext(self, new_transaction, transaction):
         pass
 
@@ -193,5 +200,18 @@ class HubspotAgency(Agency):
                 line_item_id = self.hubspot_connector.insert_update_line_item(hs_product=item["hs_product"], quantity=item["quantity"], price=item["price"], associations=["deals"])
                 self.hubspot_connector.associate_line_item_deal(line_item_id, deal_id)
         return deal_id
-
+    
+    def get_owner_by_name(self, sales_rep):
+        if isinstance(sales_rep, str):
+            owners_name_mapping = self.get_owners_name_mapping()
+            return owners_name_mapping.get(sales_rep.lower(), None)
+        return None
+            
+    def get_owners_name_mapping(self):
+        if len(self.all_owners) == 0:
+            owners = self.hubspot_connector.get_all_owners()
+            for owner in owners:
+                owner_name = "{first_name} {last_name}".format(first_name=owner.first_name, last_name=owner.last_name)
+                self.all_owners[owner_name.lower()] = owner
+        return self.all_owners
 
