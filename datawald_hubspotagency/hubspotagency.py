@@ -4,7 +4,7 @@ from __future__ import print_function
 
 __author__ = "bibow"
 
-import traceback, pendulum
+import traceback, pendulum, time
 from datawald_agency import Agency
 from datawald_connector import DatawaldConnector
 from hubspot_connector import HubspotConnector
@@ -50,6 +50,7 @@ class HubspotAgency(Agency):
                             "end_date": end.strftime("%Y-%m-%dT%H:%M:%S%z"),
                         }
                     )
+                    time.sleep(5)
         except Exception:
             log = traceback.format_exc()
             self.logger.exception(log)
