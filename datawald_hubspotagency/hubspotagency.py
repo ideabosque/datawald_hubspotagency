@@ -60,14 +60,15 @@ class HubspotAgency(Agency):
 
     def get_sales_offfline_opportunities(self, **params):
         deal_params = {}
+        ## one filters only allow 3 conditions
         deal_params["filter_groups"] = [
             {
                 "filters": [
-                    {
-                        "value": self.setting.get("sales_offline_opportunity_pipeline"),
-                        "propertyName": "pipeline",
-                        "operator": "EQ"
-                    },
+                    # {
+                    #     "value": self.setting.get("sales_offline_opportunity_pipeline"),
+                    #     "propertyName": "pipeline",
+                    #     "operator": "EQ"
+                    # },
                     {
                         "value": self.setting.get("sales_offline_opportunity_dealstage"),
                         "propertyName": "dealstage",
@@ -84,6 +85,23 @@ class HubspotAgency(Agency):
                 ]
             }
         ]
+        limited_deal_owner_ids = self.setting.get("sales_offline_opportunity_limited_deal_owner_ids", [])
+        if len(limited_deal_owner_ids) > 0:
+            deal_params["filter_groups"][0]["filters"].append(
+                {
+                    "values": limited_deal_owner_ids,
+                    "propertyName": "hubspot_owner_id",
+                    "operator": "IN"
+                }
+            )
+        else:
+            deal_params["filter_groups"][0]["filters"].append(
+                {
+                    "value": self.setting.get("sales_offline_opportunity_pipeline"),
+                    "propertyName": "pipeline",
+                    "operator": "EQ"
+                }
+            )
         deal_params["limit"]=50
         deal_params["sorts"] = ["hs_lastmodifieddate"]
         # deal_params["properties"] = ["pipeline","class", "customer_po", "delivery_type", "fob_remarks", "freight_terms", "hold_reason", "location", "order_type", "ship_date", "shipping_carrier", "shipping_instructions", "shipping_method", "status", "terms"]
