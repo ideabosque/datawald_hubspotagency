@@ -285,20 +285,23 @@ class HubspotAgency(Agency):
                     ).strftime("%Y-%m-%dT%H:%M:%S%z"),
                 },
             )
-
             if float(kwargs.get("hours", 0)) > 0:
                 params.update(
                     {
                         "end_date": (
                             kwargs.get("cut_date")
                             + timedelta(hours=float(kwargs.get("hours")))
-                        ).strftime("%Y-%m-%dT%H:%M:%S%z")
+                        ).astimezone(timezone(self.setting.get("TIMEZONE", "UTC"))).strftime("%Y-%m-%dT%H:%M:%S%z")
                     }
                 )
 
             if kwargs.get("tx_type") == "company":
                 raw_persons = self.get_records(
                     self.get_companies, **params
+                )
+            elif kwargs.get("tx_type") == "contact":
+                raw_persons = self.get_records(
+                    self.get_contacts, **params
                 )
             else:
                 raise Exception(f"{kwargs.get('tx_type')} is not supported.")
@@ -351,39 +354,50 @@ class HubspotAgency(Agency):
         return person
     
     def tx_person_src_ext(self, raw_person, **kwargs):
-        hubspot_owner_id = raw_person.pop("hubspot_owner_id", None)
-        hs_created_by_user_id = raw_person.pop("hs_created_by_user_id", None)
-        hubspot_team_id = raw_person.get("hubspot_team_id", None)
-        seller_sales_rep_id = raw_person.get("seller_sales_rep2", None)
-        seller_sales_rep_assistant_id = raw_person.get("seller_sales_rep_assistant", None)
-        sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
-        hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
-        owner = self.get_hubspot_user_by_id(hubspot_owner_id)
-        created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
-        seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
-        seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
-        sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
-        if hs_parent_company_id:
-            parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
-        else:
-            parent_company = None
-
-        raw_person["hubspot_owner"] = "{first_name} {last_name}".format(first_name=owner.first_name, last_name=owner.last_name) if owner is not None else None
-        raw_person["created_by_user"] = "{first_name} {last_name}".format(first_name=created_by_user.first_name, last_name=created_by_user.last_name) if created_by_user is not None else None
-        raw_person["hubspot_team"] = self.get_hubspot_team_label_by_id(hubspot_team_id)
-        raw_person["parent_company"] = parent_company.properties.get("name")  if parent_company is not None else None
-        raw_person["seller_sales_rep2"] = "{first_name} {last_name}".format(first_name=seller_sales_rep.first_name, last_name=seller_sales_rep.last_name) if seller_sales_rep is not None else None
-        raw_person["seller_sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=seller_sales_rep_assistant.first_name, last_name=seller_sales_rep_assistant.last_name) if seller_sales_rep_assistant is not None else None
-        raw_person["sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=sales_rep_assistant.first_name, last_name=sales_rep_assistant.last_name) if sales_rep_assistant is not None else None
-        for key,value in raw_person.items():
-            if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
-                # if Decimal(value) == Decimal(value).to_integral():
-                #     actual_value = int(value)
-                # else:
-                actual_value = float(value)
-                raw_person[key] = actual_value
+        if kwargs.get("tx_type") == "company":
+            hubspot_owner_id = raw_person.pop("hubspot_owner_id", None)
+            hs_created_by_user_id = raw_person.pop("hs_created_by_user_id", None)
+            hubspot_team_id = raw_person.get("hubspot_team_id", None)
+            seller_sales_rep_id = raw_person.get("seller_sales_rep2", None)
+            seller_sales_rep_assistant_id = raw_person.get("seller_sales_rep_assistant", None)
+            sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
+            hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
+            owner = self.get_hubspot_user_by_id(hubspot_owner_id)
+            created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
+            seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
+            seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
+            sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
+            if hs_parent_company_id:
+                parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
             else:
-                raw_person[key] = value
+                parent_company = None
+
+            raw_person["hubspot_owner"] = "{first_name} {last_name}".format(first_name=owner.first_name, last_name=owner.last_name) if owner is not None else None
+            raw_person["created_by_user"] = "{first_name} {last_name}".format(first_name=created_by_user.first_name, last_name=created_by_user.last_name) if created_by_user is not None else None
+            raw_person["hubspot_team"] = self.get_hubspot_team_label_by_id(hubspot_team_id)
+            raw_person["parent_company"] = parent_company.properties.get("name")  if parent_company is not None else None
+            raw_person["seller_sales_rep2"] = "{first_name} {last_name}".format(first_name=seller_sales_rep.first_name, last_name=seller_sales_rep.last_name) if seller_sales_rep is not None else None
+            raw_person["seller_sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=seller_sales_rep_assistant.first_name, last_name=seller_sales_rep_assistant.last_name) if seller_sales_rep_assistant is not None else None
+            raw_person["sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=sales_rep_assistant.first_name, last_name=sales_rep_assistant.last_name) if sales_rep_assistant is not None else None
+            for key,value in raw_person.items():
+                if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
+                    # if Decimal(value) == Decimal(value).to_integral():
+                    #     actual_value = int(value)
+                    # else:
+                    actual_value = float(value)
+                    raw_person[key] = actual_value
+                else:
+                    raw_person[key] = value
+        elif kwargs.get("tx_type") == "contact":
+            primary_company_id = self.hubspot_connector.get_contact_primary_company_id(raw_person["hs_object_id"])
+            primary_company = None
+            if primary_company_id:
+                try:
+                    company = self.hubspot_connector.get_company(company_id=primary_company_id, properties=self.setting.get("company_properties", []))
+                    primary_company = company.properties
+                except Exception as e:
+                    pass
+            raw_person["primary_company"] = primary_company
         return raw_person
     
     def get_companies(self, **params):
@@ -423,6 +437,36 @@ class HubspotAgency(Agency):
         company_params["properties"] = self.setting.get("company_properties", None)
         # company_params["after"] = 10000
         return self.hubspot_connector.get_companies(**company_params)
+    
+    def get_contacts(self, **params):
+        contact_params = {}
+        contact_params["filter_groups"] = [
+            {
+                "filters": [
+                    {
+                        "dateTimeFormat": "EPOCH_MILLISECONDS",
+                        "value": int(datetime.strptime(params.get("cut_date", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp() * 1000),
+                        "highValue": int(datetime.strptime(params.get("end_date", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp() * 1000),
+                        "propertyName": "lastmodifieddate",
+                        "operator": "BETWEEN"
+                    },
+                    {
+                        "value": True,
+                        "propertyName": "can_sync",
+                        "operator": "EQ"
+                    }
+                ]
+            }
+        ]
+        limit_count = params.get("limit", 100)
+        limit = 100
+        if int(limit_count) < limit:
+            limit = limit_count
+        contact_params['limit_count'] = limit_count
+        contact_params["limit"] = limit
+        contact_params["sorts"] = ["lastmodifieddate"]
+        contact_params["properties"] = self.setting.get("contact_properties", None)
+        return self.hubspot_connector.get_contacts(**contact_params)
     
     def tx_person_tgt(self, person):
         return person
