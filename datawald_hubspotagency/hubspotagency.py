@@ -208,6 +208,7 @@ class HubspotAgency(Agency):
         if (raw_transaction.get("pipeline", None) is not None 
         and raw_transaction.get("hs_object_id")
         and raw_transaction.get("pipeline", None) == self.setting.get("sales_offline_opportunity_pipeline")):
+            # get line items
             raw_transaction["items"] = []
             try:
                 line_items_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="line_items")
@@ -223,6 +224,7 @@ class HubspotAgency(Agency):
             except Exception as e:
                 pass 
             
+            # get associated contact
             contacts_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="contact")
             raw_transaction["contact"] = {}
             if len(contacts_result.results) > 0:
@@ -234,12 +236,30 @@ class HubspotAgency(Agency):
                             break
                     except Exception:
                         pass
+
             if not raw_transaction.get("customer_po"):
                 raw_transaction["customer_po"] = datetime.now(tz=timezone(self.setting.get("TIMEZONE", "UTC"))).strftime("%Y%m%d%H%M")
             ship_hours = 0
             if datetime.now(tz=timezone("America/Los_Angeles")).hour >= 12:
                 ship_hours = 24
             raw_transaction["ship_date"] = ship_hours
+
+            # only get attachments before ns sync order back to hubspot
+            if not raw_transaction.get("deal_number"):
+                attached_files = []
+                notes = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="notes")
+                for note in notes.results:
+                    note_details = self.hubspot_connector.get_note(note.id, ["hs_note_body","hubspot_owner_id", "hs_attachment_ids"])
+                    attachment_ids = note_details.properties.get("hs_attachment_ids","").split(";")
+                    for file_id in attachment_ids:
+                        file_details = self.hubspot_connector.get_file_with_signed_url(file_id)
+                        attached_files.append({
+                            "name": file_details.name,
+                            "extension": file_details.extension,
+                            "url": file_details.url,
+                            "expires_at": file_details.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                raw_transaction["attachments"] = attached_files
         return raw_transaction
     
     def tx_transaction_tgt(self, transaction):
