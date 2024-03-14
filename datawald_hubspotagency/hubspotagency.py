@@ -250,15 +250,16 @@ class HubspotAgency(Agency):
                 notes = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="notes")
                 for note in notes.results:
                     note_details = self.hubspot_connector.get_note(note.id, ["hs_note_body","hubspot_owner_id", "hs_attachment_ids"])
-                    attachment_ids = note_details.properties.get("hs_attachment_ids","").split(";")
-                    for file_id in attachment_ids:
-                        file_details = self.hubspot_connector.get_file_with_signed_url(file_id)
-                        attached_files.append({
-                            "name": file_details.name,
-                            "extension": file_details.extension,
-                            "url": file_details.url,
-                            "expires_at": file_details.expires_at.strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                    if note_details.properties.get("hs_attachment_ids"):
+                        attachment_ids = note_details.properties.get("hs_attachment_ids","").split(";")
+                        for file_id in attachment_ids:
+                            file_details = self.hubspot_connector.get_file_with_signed_url(file_id)
+                            attached_files.append({
+                                "name": file_details.name,
+                                "extension": file_details.extension,
+                                "url": file_details.url,
+                                "expires_at": file_details.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                            })
                 raw_transaction["attachments"] = attached_files
         return raw_transaction
     
