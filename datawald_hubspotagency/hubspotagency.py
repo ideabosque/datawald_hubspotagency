@@ -439,6 +439,9 @@ class HubspotAgency(Agency):
         return self.hubspot_connector.get_companies(**company_params)
     
     def get_contacts(self, **params):
+        sync_control_field = self.setting.get("contact_sync_ns_filed", None)
+        if not sync_control_field:
+            raise Exception("contact_sync_ns_filed is not setted.")
         contact_params = {}
         contact_params["filter_groups"] = [
             {
@@ -452,7 +455,7 @@ class HubspotAgency(Agency):
                     },
                     {
                         "value": True,
-                        "propertyName": "can_sync",
+                        "propertyName": sync_control_field,
                         "operator": "EQ"
                     }
                 ]
