@@ -401,11 +401,15 @@ class HubspotAgency(Agency):
             seller_sales_rep_assistant_id = raw_person.get("seller_sales_rep_assistant", None)
             sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
             hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
+            cs_rep_id = raw_person.pop("cs_rep", None)
+
             owner = self.get_hubspot_user_by_id(hubspot_owner_id)
             created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
             seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
             seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
             sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
+            cs_rep = self.get_hubspot_user_by_id(cs_rep_id)
+
             if hs_parent_company_id:
                 parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
             else:
@@ -418,6 +422,8 @@ class HubspotAgency(Agency):
             raw_person["seller_sales_rep2"] = "{first_name} {last_name}".format(first_name=seller_sales_rep.first_name, last_name=seller_sales_rep.last_name) if seller_sales_rep is not None else None
             raw_person["seller_sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=seller_sales_rep_assistant.first_name, last_name=seller_sales_rep_assistant.last_name) if seller_sales_rep_assistant is not None else None
             raw_person["sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=sales_rep_assistant.first_name, last_name=sales_rep_assistant.last_name) if sales_rep_assistant is not None else None
+            raw_person["cs_rep"] = "{first_name} {last_name}".format(first_name=cs_rep.first_name, last_name=cs_rep.last_name) if cs_rep is not None else None
+            
             for key,value in raw_person.items():
                 if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
                     # if Decimal(value) == Decimal(value).to_integral():
