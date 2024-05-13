@@ -58,8 +58,13 @@ class HubspotAgency(Agency):
             self.logger.exception(log)
             raise
 
-    def get_sales_offfline_opportunities(self, **params):
+    def get_deals(self, **params):
+        sync_control_field = self.setting.get("deal_sync_ns_filed", None)
+        # use one field to control whether to sync deal to ns, the value of this field will be controlled by HS workflow 
+        if not sync_control_field:
+            raise Exception("deal_sync_ns_filed is not setted.")
         deal_params = {}
+
         ## one filters only allow 3 conditions
         deal_params["filter_groups"] = [
             {
@@ -69,9 +74,14 @@ class HubspotAgency(Agency):
                     #     "propertyName": "pipeline",
                     #     "operator": "EQ"
                     # },
+                    # {
+                    #     "value": self.setting.get("sales_offline_opportunity_dealstage"),
+                    #     "propertyName": "dealstage",
+                    #     "operator": "EQ"
+                    # },
                     {
-                        "value": self.setting.get("sales_offline_opportunity_dealstage"),
-                        "propertyName": "dealstage",
+                        "value": True,
+                        "propertyName": sync_control_field,
                         "operator": "EQ"
                     },
                     {
@@ -81,7 +91,6 @@ class HubspotAgency(Agency):
                         "propertyName": "hs_lastmodifieddate",
                         "operator": "BETWEEN"
                     }
-                    
                 ]
             }
         ]
@@ -94,14 +103,15 @@ class HubspotAgency(Agency):
                     "operator": "IN"
                 }
             )
-        else:
-            deal_params["filter_groups"][0]["filters"].append(
-                {
-                    "value": self.setting.get("sales_offline_opportunity_pipeline"),
-                    "propertyName": "pipeline",
-                    "operator": "EQ"
-                }
-            )
+        # else:
+        #     deal_params["filter_groups"][0]["filters"].append(
+        #         {
+        #             "value": self.setting.get("sales_offline_opportunity_pipeline"),
+        #             "propertyName": "pipeline",
+        #             "operator": "EQ"
+        #         }
+        #     )
+
         deal_params["limit"]=50
         deal_params["sorts"] = ["hs_lastmodifieddate"]
         # deal_params["properties"] = ["pipeline","class", "customer_po", "delivery_type", "fob_remarks", "freight_terms", "hold_reason", "location", "order_type", "ship_date", "shipping_carrier", "shipping_instructions", "shipping_method", "status", "terms"]
@@ -134,7 +144,7 @@ class HubspotAgency(Agency):
 
             if kwargs.get("tx_type") == "order":
                 raw_transactions = self.get_records(
-                    self.get_sales_offfline_opportunities, **params
+                    self.get_deals, **params
                 )
             else:
                 raise Exception(f"{kwargs.get('tx_type')} is not supported.")
@@ -200,7 +210,7 @@ class HubspotAgency(Agency):
     #                     + timedelta(hours=float(kwargs.get("hours", 0)))
     #                 }
     #             )
-    #         return self.get_sales_offfline_opportunities(**params)
+    #         return self.get_deals(**params)
     #     else:
     #         return 0
 
@@ -224,6 +234,19 @@ class HubspotAgency(Agency):
             except Exception as e:
                 pass 
             
+            # get associated company
+            companies_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="company")
+            raw_transaction["company"] = {}
+            if len(companies_result.results) > 0:
+                for company_result in companies_result.results:
+                    try:
+                        company = self.hubspot_connector.get_company(company_id=company_result.id, properties=["netsuite_company_id"])
+                        if not company.archived:
+                            raw_transaction["company"] = company.properties
+                            break
+                    except Exception:
+                        pass
+                        
             # get associated contact
             contacts_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="contact")
             raw_transaction["contact"] = {}
@@ -231,8 +254,8 @@ class HubspotAgency(Agency):
                 for contact_result in contacts_result.results:
                     try:
                         contact = self.hubspot_connector.get_contact(contact_id=contact_result.id, properties=["email","firstname", "lastname","gwi_account_no"])
-                        raw_transaction["contact"] = contact.properties
                         if not contact.archived:
+                            raw_transaction["contact"] = contact.properties
                             break
                     except Exception:
                         pass
