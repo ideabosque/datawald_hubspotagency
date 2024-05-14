@@ -603,6 +603,11 @@ class HubspotAgency(Agency):
         if hs_deal_id is not None:
             only_update_exists_deal = True
 
+        order_type = transaction["data"].get("order_type")
+        ignore_order_types = self.setting.get("deal_ignore_order_type", [])
+        if order_type and order_type.lower() in ignore_order_types:
+            raise IgnoreException(f"Order Type({order_type}) can not be synced to hubspot.")
+        
         if order_status != "Billed" and hs_deal_id is None:
             raise IgnoreException(f"{deal_number}'s status is not Billed, can not be synced to hubspot.")
         
