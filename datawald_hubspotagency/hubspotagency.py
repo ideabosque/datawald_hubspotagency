@@ -241,7 +241,7 @@ class HubspotAgency(Agency):
                 for company_result in companies_result.results:
                     try:
                         company = self.hubspot_connector.get_company(company_id=company_result.id, properties=["netsuite_company_id"])
-                        if not company.archived:
+                        if not company.archived and company.properties.get("netsuite_company_id"):
                             raw_transaction["company"] = company.properties
                             break
                     except Exception:
@@ -254,7 +254,7 @@ class HubspotAgency(Agency):
                 for contact_result in contacts_result.results:
                     try:
                         contact = self.hubspot_connector.get_contact(contact_id=contact_result.id, properties=["email","firstname", "lastname","gwi_account_no"])
-                        if not contact.archived:
+                        if not contact.archived and contact.properties.get("gwi_account_no"):
                             raw_transaction["contact"] = contact.properties
                             break
                     except Exception:
@@ -480,7 +480,6 @@ class HubspotAgency(Agency):
                         "propertyName": "hs_lastmodifieddate",
                         "operator": "BETWEEN"
                     }
-                    
                 ]
             }
         ]
