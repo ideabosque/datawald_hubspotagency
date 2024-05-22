@@ -659,7 +659,7 @@ class HubspotAgency(Agency):
             try:
                 company = self.hubspot_connector.get_company(company_id, self.setting["id_property"]["company"])
                 company_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="company")
-                if len(company_association.results) == 0:
+                if company is not None and len(company_association.results) == 0:
                     self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company.id)
                     
             except Exception as e:
