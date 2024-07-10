@@ -677,7 +677,7 @@ class HubspotAgency(Agency):
                 contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
                 if len(contact_association.results) == 0:
                     self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
-                    if contact.properties.get("hubspot_owner_id"):
+                    if transaction["data"].get("hubspot_owner_id", None) is None and contact.properties.get("hubspot_owner_id"):
                         update_deal_owner = {
                             "hs_object_id": deal_id,
                             "hubspot_owner_id": contact.properties.get("hubspot_owner_id")
