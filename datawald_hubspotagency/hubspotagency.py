@@ -648,9 +648,15 @@ class HubspotAgency(Agency):
             raise Exception(f"{deal_number} does not have avaliable items")
 
         company_id = transaction["data"].pop("company_id", None)
+        pipeline = str(transaction["data"].get("pipeline")) if transaction["data"].get("pipeline") else None
+        if self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline) is not None and pipeline is not None:
+            id_property = self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline)
+        else:
+            id_property=self.setting["id_property"][tx_type]
+
         deal_id = self.hubspot_connector.insert_update_deal(
             transaction["data"],
-            id_property=self.setting["id_property"][tx_type],
+            id_property=id_property,
         )
         if deal_id is None:
             raise Exception(f"Fail to create deal. deal_number:{deal_number}")
@@ -667,10 +673,16 @@ class HubspotAgency(Agency):
                 pass
         if transaction["data"].get("associated_email_contact"):
             try:
-                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"])
+                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"], ["hubspot_owner_id"])
                 contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
                 if len(contact_association.results) == 0:
                     self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
+                    if contact.properties.get("hubspot_owner_id"):
+                        update_deal_owner = {
+                            "hs_object_id": deal_id,
+                            "hubspot_owner_id": contact.properties.get("hubspot_owner_id")
+                        }
+                        self.hubspot_connector.update_deal(update_deal_owner)
             except Exception as e:
                 self.logger.info(str(e))
                 pass
