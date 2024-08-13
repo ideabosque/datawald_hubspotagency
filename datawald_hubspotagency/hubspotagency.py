@@ -302,6 +302,14 @@ class HubspotAgency(Agency):
             else:
                 transaction["data"]["seller_sales_rep"] = None
 
+        if transaction["data"].get("product_manager_name", None):
+            product_manager_name = transaction["data"]["product_manager_name"]
+            owner = self.get_owner_by_name(product_manager_name)
+            if owner is not None:
+                transaction["data"]["product_manager"] = owner.id
+            else:
+                transaction["data"]["product_manager"] = None
+
         return transaction
     
     def tx_transaction_tgt_ext(self, new_transaction, transaction):
