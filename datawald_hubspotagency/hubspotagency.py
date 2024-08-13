@@ -303,7 +303,7 @@ class HubspotAgency(Agency):
                 transaction["data"]["seller_sales_rep"] = None
 
         if transaction["data"].get("product_manager_name", None):
-            product_manager_name = transaction["data"]["product_manager_name"]
+            product_manager_name = transaction["data"].pop("product_manager_name", None)
             owner = self.get_owner_by_name(product_manager_name)
             if owner is not None:
                 transaction["data"]["product_manager"] = owner.id
