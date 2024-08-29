@@ -19,6 +19,8 @@ class HubspotAgency(Agency):
     all_owners = {}
     hubspot_users = {}
     hubspot_team_options = None
+    hubspot_properties = {}
+    properties_can_process = {}
 
     def __init__(self, logger, **setting):
         self.logger = logger
@@ -425,37 +427,42 @@ class HubspotAgency(Agency):
             sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
             hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
             cs_rep_id = raw_person.pop("cs_rep", None)
-
-            owner = self.get_hubspot_user_by_id(hubspot_owner_id)
-            created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
-            seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
-            seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
-            sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
-            cs_rep = self.get_hubspot_user_by_id(cs_rep_id)
+            raw_person = self.process_hubspot_properties_values(
+                object_type="company",
+                properties_data=raw_person,
+                ignore_properties=[],
+                properties=self.setting.get("company_properties")
+            )
+            # owner = self.get_hubspot_user_by_id(hubspot_owner_id)
+            # created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
+            # seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
+            # seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
+            # sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
+            # cs_rep = self.get_hubspot_user_by_id(cs_rep_id)
 
             if hs_parent_company_id:
                 parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
             else:
                 parent_company = None
 
-            raw_person["hubspot_owner"] = "{first_name} {last_name}".format(first_name=owner.first_name, last_name=owner.last_name) if owner is not None else None
-            raw_person["created_by_user"] = "{first_name} {last_name}".format(first_name=created_by_user.first_name, last_name=created_by_user.last_name) if created_by_user is not None else None
+            raw_person["hubspot_owner"] = self.get_hubspot_user_name_by_id(hubspot_owner_id)
+            raw_person["created_by_user"] = self.get_hubspot_user_name_by_id(hs_created_by_user_id)
             raw_person["hubspot_team"] = self.get_hubspot_team_label_by_id(hubspot_team_id)
             raw_person["parent_company"] = parent_company.properties.get("name")  if parent_company is not None else None
-            raw_person["seller_sales_rep2"] = "{first_name} {last_name}".format(first_name=seller_sales_rep.first_name, last_name=seller_sales_rep.last_name) if seller_sales_rep is not None else None
-            raw_person["seller_sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=seller_sales_rep_assistant.first_name, last_name=seller_sales_rep_assistant.last_name) if seller_sales_rep_assistant is not None else None
-            raw_person["sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=sales_rep_assistant.first_name, last_name=sales_rep_assistant.last_name) if sales_rep_assistant is not None else None
-            raw_person["cs_rep"] = "{first_name} {last_name}".format(first_name=cs_rep.first_name, last_name=cs_rep.last_name) if cs_rep is not None else None
+            raw_person["seller_sales_rep2"] = self.get_hubspot_user_name_by_id(seller_sales_rep_id)
+            raw_person["seller_sales_rep_assistant"] = self.get_hubspot_user_name_by_id(seller_sales_rep_assistant_id)
+            raw_person["sales_rep_assistant"] = self.get_hubspot_user_name_by_id(sales_rep_assistant_id)
+            raw_person["cs_rep"] = self.get_hubspot_user_name_by_id(cs_rep_id)
             
-            for key,value in raw_person.items():
-                if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
-                    # if Decimal(value) == Decimal(value).to_integral():
-                    #     actual_value = int(value)
-                    # else:
-                    actual_value = float(value)
-                    raw_person[key] = actual_value
-                else:
-                    raw_person[key] = value
+            # for key,value in raw_person.items():
+            #     if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
+            #         # if Decimal(value) == Decimal(value).to_integral():
+            #         #     actual_value = int(value)
+            #         # else:
+            #         actual_value = float(value)
+            #         raw_person[key] = actual_value
+            #     else:
+            #         raw_person[key] = value
         elif kwargs.get("tx_type") == "contact":
             primary_company_id = self.hubspot_connector.get_contact_primary_company_id(raw_person["hs_object_id"])
             primary_company = None
@@ -820,6 +827,16 @@ class HubspotAgency(Agency):
         hubspot_users = self.get_all_hubspot_users()
         return hubspot_users.get(str(hubspot_user_id), None)
     
+    def get_hubspot_user_name_by_id(self, hubspot_user_id):
+        hubspot_users = self.get_all_hubspot_users()
+        user = hubspot_users.get(str(hubspot_user_id), None)
+        if user is None:
+            return None
+        if user.archived:
+            return "{first_name} {last_name} (Deactivated User)".format(first_name=user.first_name, last_name=user.last_name)
+        else:
+            return "{first_name} {last_name}".format(first_name=user.first_name, last_name=user.last_name)
+    
     def get_owners_name_mapping(self):
         if len(self.all_owners) == 0:
             owners = self.get_all_hubspot_users()
@@ -854,3 +871,71 @@ class HubspotAgency(Agency):
         if self.hubspot_team_options is None:
             self.hubspot_team_options = {}
         return self.hubspot_team_options
+
+    def get_hubspot_properties(self, object_type, properties=None):
+        if object_type in self.hubspot_properties:
+            return self.hubspot_properties.get(object_type)
+        try:
+            response = self.hubspot_connector.get_properties_by_object_type(object_type, properties)
+            self.hubspot_properties[object_type] = [
+                property_model.to_dict()
+                for property_model in response.results
+            ]
+        except Exception as e:
+            self.logger.info(str(e))
+            self.hubspot_properties[object_type] = None
+            pass
+        return self.hubspot_properties[object_type]
+    
+    def get_properties_can_be_processed(self, object_type, properties=None):
+        if object_type in self.properties_can_process:
+            return self.properties_can_process.get(object_type, {})
+        hubspot_properties = self.get_hubspot_properties(object_type, properties)
+        process_properties = {
+            property_data.get("name"): property_data
+            for property_data in hubspot_properties
+        }
+        for name, data in process_properties.items():
+            if len(data.get("options", [])) > 0:
+                process_properties[name]["options_mapping"] = {
+                    option.get("value"): option.get("label")
+                    for option in data.get("options")
+                    if option.get("value") and option.get("label")
+                }
+            else:
+                process_properties[name]["options_mapping"] = {}
+        self.properties_can_process[object_type] = process_properties
+
+        return self.properties_can_process[object_type]
+    
+    def format_property_value(self, property_setting, value):
+        if value is None:
+            return value
+        if property_setting.get("field_type") == "checkbox" and len(property_setting.get("options", [])) > 0:
+            value_arr = [
+                property_setting.get("options_mapping", {}).get(one, one)
+                for one in value.split(";")
+            ]
+            return ";".join(value_arr)
+        elif property_setting.get("type") == "enumeration" and len(property_setting.get("options", [])) > 0:
+            return property_setting.get("options_mapping", {}).get(value, value)
+        elif property_setting.get("type") == "number" and value:
+            return float(value)
+        return value
+    
+    def process_hubspot_properties_values(self, object_type, properties_data, ignore_properties=[], properties=None):
+        process_properties = self.get_properties_can_be_processed(object_type, properties)
+        convert_timezone = self.setting.get("convert_timezone_settings", {})
+        for property_name, property_setting in process_properties.items():
+            if property_name in properties_data and property_name not in ignore_properties:
+                new_value = self.format_property_value(property_setting=property_setting, value=properties_data.get(property_name))
+                
+                if len(convert_timezone) > 0 and property_setting.get("type") == "datetime" and properties_data.get(property_name):
+                    for suffix, timezone_name in convert_timezone.items():
+                        field_name_with_suffix = "{proterty_name}_{suffix}".format(proterty_name=property_name, suffix=suffix)
+                        if properties_data.get(property_name, "").find(".") != -1:
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%S.%fZ").astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                        else:
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                properties_data[property_name] = new_value
+        return properties_data
