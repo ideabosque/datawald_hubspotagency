@@ -427,6 +427,7 @@ class HubspotAgency(Agency):
     
     def tx_person_src_ext(self, raw_person, **kwargs):
         if kwargs.get("tx_type") == "company":
+            account_manager_id = raw_person.pop("account_manager__user_property_", None)
             hubspot_owner_id = raw_person.pop("hubspot_owner_id", None)
             hs_created_by_user_id = raw_person.pop("hs_created_by_user_id", None)
             hubspot_team_id = raw_person.get("hubspot_team_id", None)
@@ -461,6 +462,7 @@ class HubspotAgency(Agency):
             raw_person["seller_sales_rep_assistant"] = self.get_hubspot_user_name_by_id(seller_sales_rep_assistant_id)
             raw_person["sales_rep_assistant"] = self.get_hubspot_user_name_by_id(sales_rep_assistant_id)
             raw_person["cs_rep"] = self.get_hubspot_user_name_by_id(cs_rep_id)
+            raw_person["account_manager"] = self.get_hubspot_user_name_by_id(account_manager_id)
             
             # for key,value in raw_person.items():
             #     if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
@@ -482,6 +484,31 @@ class HubspotAgency(Agency):
                     pass
             raw_person["primary_company"] = primary_company
         return raw_person
+    
+    def get_companies_by_ids(self, **params):
+        hs_object_ids = params.get("hs_object_ids", [])
+        if len(hs_object_ids) == 0:
+            return []
+        company_params = {}
+        company_params["filter_groups"] = [
+            {
+                "filters": [
+                    {
+                    "values": hs_object_ids,
+                    "propertyName": "hs_object_id",
+                    "operator": "IN"
+                }
+                ]
+            }
+        ]
+        limit_count = params.get("limit", 100)
+        limit = 100
+        if int(limit_count) < limit:
+            limit = limit_count
+        company_params['limit_count'] = limit_count
+        company_params["limit"] = limit
+        company_params["properties"] = self.setting.get("company_properties", None)
+        return self.hubspot_connector.get_companies(**company_params)
     
     def get_companies(self, **params):
         company_params = {}
@@ -505,19 +532,7 @@ class HubspotAgency(Agency):
         company_params['limit_count'] = limit_count
         company_params["limit"] = limit
         company_params["sorts"] = ["hs_lastmodifieddate"]
-        # company_params["properties"] = ["account_manager","account_tags", "account_transfer_date", "annualrevenue", "category", "city", "domain", "name", "hubspot_owner_id", "contract_manufacturer", "country", 
-        #                                 "createdate", "hs_created_by_user_id", "customer_group", "customer_territory", "date_of_first_registration", "engagements_last_meeting_booked", "days_to_close", "division", 
-        #                                 "event_tags", "first_contact_createdate", "first_conversion_event_name", "first_conversion_date", "first_deal_created_date", "hs_analytics_first_touch_converting_campaign",
-        #                                 "hubspot_team_id", "industries", "industry", "is_factory", "notes_last_updated", "notes_last_contacted", "hs_last_sales_activity_timestamp", "hs_lastmodifieddate", "hs_analytics_latest_source",
-        #                                 "hs_analytics_latest_source_data_1", "hs_analytics_latest_source_data_2", "hs_analytics_latest_source_timestamp", "lead_qualified_date", "lead_qualified_", "lead_qualifier",
-        #                                 "lead_score", "lead_source", "hs_lead_status", "lifecyclestage", "hs_predictivecontactscore_v2", "netsuite_company_id", "num_associated_contacts", "num_associated_deals","hs_num_child_companies",
-        #                                 "numberofemployees", "num_conversion_events", "hs_num_open_deals", "hs_analytics_num_page_views", "hs_analytics_num_visits", "num_contacted_notes", "hs_analytics_source_data_1",
-        #                                 "hs_analytics_source_data_2", "hs_analytics_source", "hubspot_owner_assigneddate", "hs_parent_company_id", "zip", "product_information", "recent_conversion_event_name", "recent_conversion_date",
-        #                                 "recent_deal_amount", "recent_deal_close_date", "reference_id", "sales_rep_assistant", "seller_contract_expiration_date", "seller_first_contract_date", "seller_product_list",
-        #                                 "seller_program", "seller_sales_rep2", "seller_rep_assigned_date", "seller_sales_rep_assistant", "seller_status", "stage", "state", "status", "target_ingredients", "hs_analytics_first_timestamp", "hs_analytics_last_timestamp",
-        #                                 "hs_analytics_first_visit_timestamp", "hs_analytics_last_visit_timestamp", "timezone", "total_revenue", "type", "test2", "test", "vip_seller", "website"]
         company_params["properties"] = self.setting.get("company_properties", None)
-        # company_params["after"] = 10000
         return self.hubspot_connector.get_companies(**company_params)
     
     def get_contacts(self, **params):
