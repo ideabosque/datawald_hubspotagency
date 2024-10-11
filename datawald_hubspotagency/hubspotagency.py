@@ -304,6 +304,14 @@ class HubspotAgency(Agency):
             else:
                 transaction["data"]["seller_sales_rep"] = None
 
+        if transaction["data"].get("product_manager_name", None):
+            product_manager_name = transaction["data"].pop("product_manager_name", None)
+            owner = self.get_owner_by_name(product_manager_name)
+            if owner is not None:
+                transaction["data"]["product_manager"] = owner.id
+            else:
+                transaction["data"]["product_manager"] = None
+
         return transaction
     
     def tx_transaction_tgt_ext(self, new_transaction, transaction):
@@ -669,33 +677,57 @@ class HubspotAgency(Agency):
         if len(hs_products) == 0:
             raise Exception(f"{deal_number} does not have avaliable items")
 
-        company_id = transaction["data"].pop("company_id", None)
+        gwi_account_no = transaction["data"].pop("company_id", None)
+        pipeline = str(transaction["data"].get("pipeline")) if transaction["data"].get("pipeline") else None
+        if self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline) is not None and pipeline is not None:
+            id_property = self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline)
+        else:
+            id_property=self.setting["id_property"][tx_type]
+
         deal_id = self.hubspot_connector.insert_update_deal(
             transaction["data"],
-            id_property=self.setting["id_property"][tx_type],
+            id_property=id_property,
         )
         if deal_id is None:
             raise Exception(f"Fail to create deal. deal_number:{deal_number}")
 
+        company_id = None
+        if gwi_account_no:
+            try:
+                company = self.hubspot_connector.get_company(gwi_account_no, self.setting["id_property"]["company"])
+                if company is not None:
+                    company_id = company.id
+            except Exception as e:
+                pass
+        
+        if transaction["data"].get("associated_email_contact"):
+            try:
+                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"], ["hubspot_owner_id"])
+                contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
+                if contact is not None and company_id is None:
+                    company_id = self.hubspot_connector.get_contact_primary_company_id(contact.id)
+                if contact is not None and len(contact_association.results) == 0:
+                    self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
+                    if transaction["data"].get("hubspot_owner_id", None) is None and contact.properties.get("hubspot_owner_id"):
+                        update_deal_owner = {
+                            "hs_object_id": deal_id,
+                            "hubspot_owner_id": contact.properties.get("hubspot_owner_id")
+                        }
+                        self.hubspot_connector.update_deal(update_deal_owner)
+            except Exception as e:
+                self.logger.info(str(e))
+                pass
+
         if company_id is not None and deal_id:
             try:
-                company = self.hubspot_connector.get_company(company_id, self.setting["id_property"]["company"])
                 company_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="company")
-                if company is not None and len(company_association.results) == 0:
-                    self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company.id)
+                if len(company_association.results) == 0:
+                    self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company_id)
                     
             except Exception as e:
                 self.logger.info(str(e))
                 pass
-        if transaction["data"].get("associated_email_contact"):
-            try:
-                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"])
-                contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
-                if len(contact_association.results) == 0:
-                    self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
-            except Exception as e:
-                self.logger.info(str(e))
-                pass
+        
             
         line_items_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="line_items")
         if len(line_items_association.results) == 0 and deal_id:
