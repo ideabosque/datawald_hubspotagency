@@ -9,7 +9,7 @@ from datawald_agency import Agency
 from datawald_connector import DatawaldConnector
 from hubspot_connector import HubspotConnector
 from datetime import datetime, timedelta
-from pytz import timezone
+from pytz import timezone,utc
 from decimal import Decimal
 
 class IgnoreException(Exception):
@@ -981,8 +981,8 @@ class HubspotAgency(Agency):
                     for suffix, timezone_name in convert_timezone.items():
                         field_name_with_suffix = "{proterty_name}_{suffix}".format(proterty_name=property_name, suffix=suffix)
                         if properties_data.get(property_name, "").find(".") != -1:
-                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%S.%fZ").astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                         else:
-                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 properties_data[property_name] = new_value
         return properties_data
