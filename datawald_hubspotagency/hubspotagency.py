@@ -984,5 +984,6 @@ class HubspotAgency(Agency):
                             properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                         else:
                             properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                            new_value = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 properties_data[property_name] = new_value
         return properties_data
