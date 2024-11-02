@@ -9,14 +9,18 @@ from datawald_agency import Agency
 from datawald_connector import DatawaldConnector
 from hubspot_connector import HubspotConnector
 from datetime import datetime, timedelta
-from pytz import timezone
+from pytz import timezone,utc
 from decimal import Decimal
 
+class IgnoreException(Exception):
+    pass
 
 class HubspotAgency(Agency):
     all_owners = {}
     hubspot_users = {}
     hubspot_team_options = None
+    hubspot_properties = {}
+    properties_can_process = {}
 
     def __init__(self, logger, **setting):
         self.logger = logger
@@ -56,19 +60,30 @@ class HubspotAgency(Agency):
             self.logger.exception(log)
             raise
 
-    def get_sales_offfline_opportunities(self, **params):
+    def get_deals(self, **params):
+        sync_control_field = self.setting.get("deal_sync_ns_filed", None)
+        # use one field to control whether to sync deal to ns, the value of this field will be controlled by HS workflow 
+        if not sync_control_field:
+            raise Exception("deal_sync_ns_filed is not setted.")
         deal_params = {}
+
+        ## one filters only allow 3 conditions
         deal_params["filter_groups"] = [
             {
                 "filters": [
+                    # {
+                    #     "value": self.setting.get("sales_offline_opportunity_pipeline"),
+                    #     "propertyName": "pipeline",
+                    #     "operator": "EQ"
+                    # },
+                    # {
+                    #     "value": self.setting.get("sales_offline_opportunity_dealstage"),
+                    #     "propertyName": "dealstage",
+                    #     "operator": "EQ"
+                    # },
                     {
-                        "value": self.setting.get("sales_offline_opportunity_pipeline"),
-                        "propertyName": "pipeline",
-                        "operator": "EQ"
-                    },
-                    {
-                        "value": self.setting.get("sales_offline_opportunity_dealstage"),
-                        "propertyName": "dealstage",
+                        "value": True,
+                        "propertyName": sync_control_field,
                         "operator": "EQ"
                     },
                     {
@@ -78,13 +93,31 @@ class HubspotAgency(Agency):
                         "propertyName": "hs_lastmodifieddate",
                         "operator": "BETWEEN"
                     }
-                    
                 ]
             }
         ]
+        limited_deal_owner_ids = self.setting.get("sales_offline_opportunity_limited_deal_owner_ids", [])
+        if len(limited_deal_owner_ids) > 0:
+            deal_params["filter_groups"][0]["filters"].append(
+                {
+                    "values": limited_deal_owner_ids,
+                    "propertyName": "hubspot_owner_id",
+                    "operator": "IN"
+                }
+            )
+        # else:
+        #     deal_params["filter_groups"][0]["filters"].append(
+        #         {
+        #             "value": self.setting.get("sales_offline_opportunity_pipeline"),
+        #             "propertyName": "pipeline",
+        #             "operator": "EQ"
+        #         }
+        #     )
+
         deal_params["limit"]=50
         deal_params["sorts"] = ["hs_lastmodifieddate"]
-        deal_params["properties"] = ["pipeline","class", "customer_po", "delivery_type", "fob_remarks", "freight_terms", "hold_reason", "location", "order_type", "ship_date", "shipping_carrier", "shipping_instructions", "shipping_method", "status", "terms"]
+        # deal_params["properties"] = ["pipeline","class", "customer_po", "delivery_type", "fob_remarks", "freight_terms", "hold_reason", "location", "order_type", "ship_date", "shipping_carrier", "shipping_instructions", "shipping_method", "status", "terms"]
+        deal_params["properties"] = self.setting.get("deal_properties", None)
         return self.hubspot_connector.get_deals(**deal_params)
 
     def tx_transactions_src(self, **kwargs):
@@ -113,7 +146,7 @@ class HubspotAgency(Agency):
 
             if kwargs.get("tx_type") == "order":
                 raw_transactions = self.get_records(
-                    self.get_sales_offfline_opportunities, **params
+                    self.get_deals, **params
                 )
             else:
                 raise Exception(f"{kwargs.get('tx_type')} is not supported.")
@@ -179,7 +212,7 @@ class HubspotAgency(Agency):
     #                     + timedelta(hours=float(kwargs.get("hours", 0)))
     #                 }
     #             )
-    #         return self.get_sales_offfline_opportunities(**params)
+    #         return self.get_deals(**params)
     #     else:
     #         return 0
 
@@ -187,6 +220,7 @@ class HubspotAgency(Agency):
         if (raw_transaction.get("pipeline", None) is not None 
         and raw_transaction.get("hs_object_id")
         and raw_transaction.get("pipeline", None) == self.setting.get("sales_offline_opportunity_pipeline")):
+            # get line items
             raw_transaction["items"] = []
             try:
                 line_items_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="line_items")
@@ -202,23 +236,56 @@ class HubspotAgency(Agency):
             except Exception as e:
                 pass 
             
+            # get associated company
+            companies_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="company")
+            raw_transaction["company"] = {}
+            if len(companies_result.results) > 0:
+                for company_result in companies_result.results:
+                    try:
+                        company = self.hubspot_connector.get_company(company_id=company_result.id, properties=["netsuite_company_id"])
+                        if not company.archived and company.properties.get("netsuite_company_id"):
+                            raw_transaction["company"] = company.properties
+                            break
+                    except Exception:
+                        pass
+                        
+            # get associated contact
             contacts_result = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="contact")
             raw_transaction["contact"] = {}
             if len(contacts_result.results) > 0:
                 for contact_result in contacts_result.results:
                     try:
                         contact = self.hubspot_connector.get_contact(contact_id=contact_result.id, properties=["email","firstname", "lastname","gwi_account_no"])
-                        raw_transaction["contact"] = contact.properties
-                        if not contact.archived:
+                        if not contact.archived and contact.properties.get("gwi_account_no"):
+                            raw_transaction["contact"] = contact.properties
                             break
                     except Exception:
                         pass
+
             if not raw_transaction.get("customer_po"):
                 raw_transaction["customer_po"] = datetime.now(tz=timezone(self.setting.get("TIMEZONE", "UTC"))).strftime("%Y%m%d%H%M")
             ship_hours = 0
             if datetime.now(tz=timezone("America/Los_Angeles")).hour >= 12:
                 ship_hours = 24
             raw_transaction["ship_date"] = ship_hours
+
+            # only get attachments before ns sync order back to hubspot
+            if not raw_transaction.get("deal_number"):
+                attached_files = []
+                notes = self.hubspot_connector.get_deal_association(deal_id=raw_transaction.get("hs_object_id"), to_object_type="notes")
+                for note in notes.results:
+                    note_details = self.hubspot_connector.get_note(note.id, ["hs_note_body","hubspot_owner_id", "hs_attachment_ids"])
+                    if note_details.properties.get("hs_attachment_ids"):
+                        attachment_ids = note_details.properties.get("hs_attachment_ids","").split(";")
+                        for file_id in attachment_ids:
+                            file_details = self.hubspot_connector.get_file_with_signed_url(file_id)
+                            attached_files.append({
+                                "name": file_details.name,
+                                "extension": file_details.extension,
+                                "url": file_details.url,
+                                "expires_at": file_details.expires_at.strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                raw_transaction["attachments"] = attached_files
         return raw_transaction
     
     def tx_transaction_tgt(self, transaction):
@@ -236,6 +303,14 @@ class HubspotAgency(Agency):
                 transaction["data"]["seller_sales_rep"] = owner.id
             else:
                 transaction["data"]["seller_sales_rep"] = None
+
+        if transaction["data"].get("product_manager_name", None):
+            product_manager_name = transaction["data"].pop("product_manager_name", None)
+            owner = self.get_owner_by_name(product_manager_name)
+            if owner is not None:
+                transaction["data"]["product_manager"] = owner.id
+            else:
+                transaction["data"]["product_manager"] = None
 
         return transaction
     
@@ -257,6 +332,10 @@ class HubspotAgency(Agency):
                 else:
                     raise Exception(f"{tx_type} is not supported.")
                 transaction["tx_status"] = "S"
+            except IgnoreException:
+                log = traceback.format_exc()
+                transaction.update({"tx_status": "I", "tx_note": log, "tgt_id": "####"})
+                self.logger.info(log)
             except Exception:
                 log = traceback.format_exc()
                 transaction.update({"tx_status": "F", "tx_note": log, "tgt_id": "####"})
@@ -278,20 +357,23 @@ class HubspotAgency(Agency):
                     ).strftime("%Y-%m-%dT%H:%M:%S%z"),
                 },
             )
-
             if float(kwargs.get("hours", 0)) > 0:
                 params.update(
                     {
                         "end_date": (
                             kwargs.get("cut_date")
                             + timedelta(hours=float(kwargs.get("hours")))
-                        ).strftime("%Y-%m-%dT%H:%M:%S%z")
+                        ).astimezone(timezone(self.setting.get("TIMEZONE", "UTC"))).strftime("%Y-%m-%dT%H:%M:%S%z")
                     }
                 )
 
             if kwargs.get("tx_type") == "company":
                 raw_persons = self.get_records(
                     self.get_companies, **params
+                )
+            elif kwargs.get("tx_type") == "contact":
+                raw_persons = self.get_records(
+                    self.get_contacts, **params
                 )
             else:
                 raise Exception(f"{kwargs.get('tx_type')} is not supported.")
@@ -344,40 +426,89 @@ class HubspotAgency(Agency):
         return person
     
     def tx_person_src_ext(self, raw_person, **kwargs):
-        hubspot_owner_id = raw_person.pop("hubspot_owner_id", None)
-        hs_created_by_user_id = raw_person.pop("hs_created_by_user_id", None)
-        hubspot_team_id = raw_person.get("hubspot_team_id", None)
-        seller_sales_rep_id = raw_person.get("seller_sales_rep2", None)
-        seller_sales_rep_assistant_id = raw_person.get("seller_sales_rep_assistant", None)
-        sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
-        hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
-        owner = self.get_hubspot_user_by_id(hubspot_owner_id)
-        created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
-        seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
-        seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
-        sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
-        if hs_parent_company_id:
-            parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
-        else:
-            parent_company = None
+        if kwargs.get("tx_type") == "company":
+            account_manager_id = raw_person.pop("account_manager__user_property_", None)
+            hubspot_owner_id = raw_person.pop("hubspot_owner_id", None)
+            hs_created_by_user_id = raw_person.pop("hs_created_by_user_id", None)
+            hubspot_team_id = raw_person.get("hubspot_team_id", None)
+            seller_sales_rep_id = raw_person.get("seller_sales_rep2", None)
+            seller_sales_rep_assistant_id = raw_person.get("seller_sales_rep_assistant", None)
+            sales_rep_assistant_id = raw_person.get("sales_rep_assistant", None)
+            hs_parent_company_id = raw_person.pop("hs_parent_company_id", None)
+            cs_rep_id = raw_person.pop("cs_rep", None)
+            raw_person = self.process_hubspot_properties_values(
+                object_type="company",
+                properties_data=raw_person,
+                ignore_properties=[],
+                properties=self.setting.get("company_properties")
+            )
+            # owner = self.get_hubspot_user_by_id(hubspot_owner_id)
+            # created_by_user = self.get_hubspot_user_by_id(hs_created_by_user_id)
+            # seller_sales_rep = self.get_hubspot_user_by_id(seller_sales_rep_id)
+            # seller_sales_rep_assistant = self.get_hubspot_user_by_id(seller_sales_rep_assistant_id)
+            # sales_rep_assistant = self.get_hubspot_user_by_id(sales_rep_assistant_id)
+            # cs_rep = self.get_hubspot_user_by_id(cs_rep_id)
 
-        raw_person["hubspot_owner"] = "{first_name} {last_name}".format(first_name=owner.first_name, last_name=owner.last_name) if owner is not None else None
-        raw_person["created_by_user"] = "{first_name} {last_name}".format(first_name=created_by_user.first_name, last_name=created_by_user.last_name) if created_by_user is not None else None
-        raw_person["hubspot_team"] = self.get_hubspot_team_label_by_id(hubspot_team_id)
-        raw_person["parent_company"] = parent_company.properties.get("name")  if parent_company is not None else None
-        raw_person["seller_sales_rep2"] = "{first_name} {last_name}".format(first_name=seller_sales_rep.first_name, last_name=seller_sales_rep.last_name) if seller_sales_rep is not None else None
-        raw_person["seller_sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=seller_sales_rep_assistant.first_name, last_name=seller_sales_rep_assistant.last_name) if seller_sales_rep_assistant is not None else None
-        raw_person["sales_rep_assistant"] = "{first_name} {last_name}".format(first_name=sales_rep_assistant.first_name, last_name=sales_rep_assistant.last_name) if sales_rep_assistant is not None else None
-        for key,value in raw_person.items():
-            if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
-                # if Decimal(value) == Decimal(value).to_integral():
-                #     actual_value = int(value)
-                # else:
-                actual_value = float(value)
-                raw_person[key] = actual_value
+            if hs_parent_company_id:
+                parent_company = self.hubspot_connector.get_company(hs_parent_company_id)
             else:
-                raw_person[key] = value
+                parent_company = None
+
+            raw_person["hubspot_owner"] = self.get_hubspot_user_name_by_id(hubspot_owner_id)
+            raw_person["created_by_user"] = self.get_hubspot_user_name_by_id(hs_created_by_user_id)
+            raw_person["hubspot_team"] = self.get_hubspot_team_label_by_id(hubspot_team_id)
+            raw_person["parent_company"] = parent_company.properties.get("name")  if parent_company is not None else None
+            raw_person["seller_sales_rep2"] = self.get_hubspot_user_name_by_id(seller_sales_rep_id)
+            raw_person["seller_sales_rep_assistant"] = self.get_hubspot_user_name_by_id(seller_sales_rep_assistant_id)
+            raw_person["sales_rep_assistant"] = self.get_hubspot_user_name_by_id(sales_rep_assistant_id)
+            raw_person["cs_rep"] = self.get_hubspot_user_name_by_id(cs_rep_id)
+            raw_person["account_manager"] = self.get_hubspot_user_name_by_id(account_manager_id)
+            
+            # for key,value in raw_person.items():
+            #     if key not in ["hs_object_id"] and isinstance(value, str) and (value.isdigit() or ((value.split(".")[0]).isdigit() and (value.split(".")[-1]).isdigit())):
+            #         # if Decimal(value) == Decimal(value).to_integral():
+            #         #     actual_value = int(value)
+            #         # else:
+            #         actual_value = float(value)
+            #         raw_person[key] = actual_value
+            #     else:
+            #         raw_person[key] = value
+        elif kwargs.get("tx_type") == "contact":
+            primary_company_id = self.hubspot_connector.get_contact_primary_company_id(raw_person["hs_object_id"])
+            primary_company = None
+            if primary_company_id:
+                try:
+                    company = self.hubspot_connector.get_company(company_id=primary_company_id, properties=self.setting.get("company_properties", []))
+                    primary_company = company.properties
+                except Exception as e:
+                    pass
+            raw_person["primary_company"] = primary_company
         return raw_person
+    
+    def get_companies_by_ids(self, **params):
+        hs_object_ids = params.get("hs_object_ids", [])
+        if len(hs_object_ids) == 0:
+            return []
+        company_params = {}
+        company_params["filter_groups"] = [
+            {
+                "filters": [
+                    {
+                    "values": hs_object_ids,
+                    "propertyName": "hs_object_id",
+                    "operator": "IN"
+                }
+                ]
+            }
+        ]
+        limit_count = params.get("limit", 100)
+        limit = 100
+        if int(limit_count) < limit:
+            limit = limit_count
+        company_params['limit_count'] = limit_count
+        company_params["limit"] = limit
+        company_params["properties"] = self.setting.get("company_properties", None)
+        return self.hubspot_connector.get_companies(**company_params)
     
     def get_companies(self, **params):
         company_params = {}
@@ -391,7 +522,6 @@ class HubspotAgency(Agency):
                         "propertyName": "hs_lastmodifieddate",
                         "operator": "BETWEEN"
                     }
-                    
                 ]
             }
         ]
@@ -402,19 +532,41 @@ class HubspotAgency(Agency):
         company_params['limit_count'] = limit_count
         company_params["limit"] = limit
         company_params["sorts"] = ["hs_lastmodifieddate"]
-        company_params["properties"] = ["account_manager","account_tags", "account_transfer_date", "annualrevenue", "category", "city", "domain", "name", "hubspot_owner_id", "contract_manufacturer", "country", 
-                                        "createdate", "hs_created_by_user_id", "customer_group", "customer_territory", "date_of_first_registration", "engagements_last_meeting_booked", "days_to_close", "division", 
-                                        "event_tags", "first_contact_createdate", "first_conversion_event_name", "first_conversion_date", "first_deal_created_date", "hs_analytics_first_touch_converting_campaign",
-                                        "hubspot_team_id", "industries", "industry", "is_factory", "notes_last_updated", "notes_last_contacted", "hs_last_sales_activity_timestamp", "hs_lastmodifieddate", "hs_analytics_latest_source",
-                                        "hs_analytics_latest_source_data_1", "hs_analytics_latest_source_data_2", "hs_analytics_latest_source_timestamp", "lead_qualified_date", "lead_qualified_", "lead_qualifier",
-                                        "lead_score", "lead_source", "hs_lead_status", "lifecyclestage", "hs_predictivecontactscore_v2", "netsuite_company_id", "num_associated_contacts", "num_associated_deals","hs_num_child_companies",
-                                        "numberofemployees", "num_conversion_events", "hs_num_open_deals", "hs_analytics_num_page_views", "hs_analytics_num_visits", "num_contacted_notes", "hs_analytics_source_data_1",
-                                        "hs_analytics_source_data_2", "hs_analytics_source", "hubspot_owner_assigneddate", "hs_parent_company_id", "zip", "product_information", "recent_conversion_event_name", "recent_conversion_date",
-                                        "recent_deal_amount", "recent_deal_close_date", "reference_id", "sales_rep_assistant", "seller_contract_expiration_date", "seller_first_contract_date", "seller_product_list",
-                                        "seller_program", "seller_sales_rep2", "seller_rep_assigned_date", "seller_sales_rep_assistant", "seller_status", "stage", "state", "status", "target_ingredients", "hs_analytics_first_timestamp", "hs_analytics_last_timestamp",
-                                        "hs_analytics_first_visit_timestamp", "hs_analytics_last_visit_timestamp", "timezone", "total_revenue", "type", "test2", "test", "vip_seller", "website"]
-        # company_params["after"] = 10000
+        company_params["properties"] = self.setting.get("company_properties", None)
         return self.hubspot_connector.get_companies(**company_params)
+    
+    def get_contacts(self, **params):
+        sync_control_field = self.setting.get("contact_sync_ns_filed", None)
+        if not sync_control_field:
+            raise Exception("contact_sync_ns_filed is not setted.")
+        contact_params = {}
+        contact_params["filter_groups"] = [
+            {
+                "filters": [
+                    {
+                        "dateTimeFormat": "EPOCH_MILLISECONDS",
+                        "value": int(datetime.strptime(params.get("cut_date", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp() * 1000),
+                        "highValue": int(datetime.strptime(params.get("end_date", ""), "%Y-%m-%dT%H:%M:%S%z").timestamp() * 1000),
+                        "propertyName": "lastmodifieddate",
+                        "operator": "BETWEEN"
+                    },
+                    {
+                        "value": True,
+                        "propertyName": sync_control_field,
+                        "operator": "EQ"
+                    }
+                ]
+            }
+        ]
+        limit_count = params.get("limit", 100)
+        limit = 100
+        if int(limit_count) < limit:
+            limit = limit_count
+        contact_params['limit_count'] = limit_count
+        contact_params["limit"] = limit
+        contact_params["sorts"] = ["lastmodifieddate"]
+        contact_params["properties"] = self.setting.get("contact_properties", None)
+        return self.hubspot_connector.get_contacts(**contact_params)
     
     def tx_person_tgt(self, person):
         return person
@@ -480,8 +632,13 @@ class HubspotAgency(Agency):
         if hs_deal_id is not None:
             only_update_exists_deal = True
 
+        order_type = transaction["data"].get("order_type")
+        ignore_order_types = self.setting.get("deal_ignore_order_type", [])
+        if order_type and order_type.lower() in ignore_order_types:
+            raise IgnoreException(f"Order Type({order_type}) can not be synced to hubspot.")
+        
         if order_status != "Billed" and hs_deal_id is None:
-            raise Exception(f"{deal_number}'s status is not Billed, can not be synced to hubspot.")
+            raise IgnoreException(f"{deal_number}'s status is not Billed, can not be synced to hubspot.")
         
         if only_update_exists_deal:
 
@@ -520,33 +677,57 @@ class HubspotAgency(Agency):
         if len(hs_products) == 0:
             raise Exception(f"{deal_number} does not have avaliable items")
 
-        company_id = transaction["data"].pop("company_id", None)
+        gwi_account_no = transaction["data"].pop("company_id", None)
+        pipeline = str(transaction["data"].get("pipeline")) if transaction["data"].get("pipeline") else None
+        if self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline) is not None and pipeline is not None:
+            id_property = self.setting.get("advanced_id_property", {}).get(tx_type, {}).get("pipeline", {}).get(pipeline)
+        else:
+            id_property=self.setting["id_property"][tx_type]
+
         deal_id = self.hubspot_connector.insert_update_deal(
             transaction["data"],
-            id_property=self.setting["id_property"][tx_type],
+            id_property=id_property,
         )
         if deal_id is None:
             raise Exception(f"Fail to create deal. deal_number:{deal_number}")
 
+        company_id = None
+        if gwi_account_no:
+            try:
+                company = self.hubspot_connector.get_company(gwi_account_no, self.setting["id_property"]["company"])
+                if company is not None:
+                    company_id = company.id
+            except Exception as e:
+                pass
+        
+        if transaction["data"].get("associated_email_contact"):
+            try:
+                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"], ["hubspot_owner_id"])
+                contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
+                if contact is not None and company_id is None:
+                    company_id = self.hubspot_connector.get_contact_primary_company_id(contact.id)
+                if contact is not None and len(contact_association.results) == 0:
+                    self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
+                    if transaction["data"].get("hubspot_owner_id", None) is None and contact.properties.get("hubspot_owner_id"):
+                        update_deal_owner = {
+                            "hs_object_id": deal_id,
+                            "hubspot_owner_id": contact.properties.get("hubspot_owner_id")
+                        }
+                        self.hubspot_connector.update_deal(update_deal_owner)
+            except Exception as e:
+                self.logger.info(str(e))
+                pass
+
         if company_id is not None and deal_id:
             try:
-                company = self.hubspot_connector.get_company(company_id, self.setting["id_property"]["company"])
                 company_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="company")
                 if len(company_association.results) == 0:
-                    self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company.id)
+                    self.hubspot_connector.associate_deal_company(deal_id=deal_id, company_id=company_id)
                     
             except Exception as e:
                 self.logger.info(str(e))
                 pass
-        if transaction["data"].get("associated_email_contact"):
-            try:
-                contact = self.hubspot_connector.get_contact(transaction["data"].get("associated_email_contact"), self.setting["id_property"]["contact"])
-                contact_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="contact")
-                if len(contact_association.results) == 0:
-                    self.hubspot_connector.associate_deal_contact(deal_id=deal_id, contact_id=contact.id)
-            except Exception as e:
-                self.logger.info(str(e))
-                pass
+        
             
         line_items_association = self.hubspot_connector.get_deal_association(deal_id=deal_id, to_object_type="line_items")
         if len(line_items_association.results) == 0 and deal_id:
@@ -693,6 +874,16 @@ class HubspotAgency(Agency):
         hubspot_users = self.get_all_hubspot_users()
         return hubspot_users.get(str(hubspot_user_id), None)
     
+    def get_hubspot_user_name_by_id(self, hubspot_user_id):
+        hubspot_users = self.get_all_hubspot_users()
+        user = hubspot_users.get(str(hubspot_user_id), None)
+        if user is None:
+            return None
+        if user.archived:
+            return "{first_name} {last_name} (Deactivated User)".format(first_name=user.first_name, last_name=user.last_name)
+        else:
+            return "{first_name} {last_name}".format(first_name=user.first_name, last_name=user.last_name)
+    
     def get_owners_name_mapping(self):
         if len(self.all_owners) == 0:
             owners = self.get_all_hubspot_users()
@@ -727,3 +918,72 @@ class HubspotAgency(Agency):
         if self.hubspot_team_options is None:
             self.hubspot_team_options = {}
         return self.hubspot_team_options
+
+    def get_hubspot_properties(self, object_type, properties=None):
+        if object_type in self.hubspot_properties:
+            return self.hubspot_properties.get(object_type)
+        try:
+            response = self.hubspot_connector.get_properties_by_object_type(object_type, properties)
+            self.hubspot_properties[object_type] = [
+                property_model.to_dict()
+                for property_model in response.results
+            ]
+        except Exception as e:
+            self.logger.info(str(e))
+            self.hubspot_properties[object_type] = None
+            pass
+        return self.hubspot_properties[object_type]
+    
+    def get_properties_can_be_processed(self, object_type, properties=None):
+        if object_type in self.properties_can_process:
+            return self.properties_can_process.get(object_type, {})
+        hubspot_properties = self.get_hubspot_properties(object_type, properties)
+        process_properties = {
+            property_data.get("name"): property_data
+            for property_data in hubspot_properties
+        }
+        for name, data in process_properties.items():
+            if len(data.get("options", [])) > 0:
+                process_properties[name]["options_mapping"] = {
+                    option.get("value"): option.get("label")
+                    for option in data.get("options")
+                    if option.get("value") and option.get("label")
+                }
+            else:
+                process_properties[name]["options_mapping"] = {}
+        self.properties_can_process[object_type] = process_properties
+
+        return self.properties_can_process[object_type]
+    
+    def format_property_value(self, property_setting, value):
+        if value is None:
+            return value
+        if property_setting.get("field_type") == "checkbox" and len(property_setting.get("options", [])) > 0:
+            value_arr = [
+                property_setting.get("options_mapping", {}).get(one, one)
+                for one in value.split(";")
+            ]
+            return ";".join(value_arr)
+        elif property_setting.get("type") == "enumeration" and len(property_setting.get("options", [])) > 0:
+            return property_setting.get("options_mapping", {}).get(value, value)
+        elif property_setting.get("type") == "number" and value:
+            return float(value)
+        return value
+    
+    def process_hubspot_properties_values(self, object_type, properties_data, ignore_properties=[], properties=None):
+        process_properties = self.get_properties_can_be_processed(object_type, properties)
+        convert_timezone = self.setting.get("convert_timezone_settings", {})
+        for property_name, property_setting in process_properties.items():
+            if property_name in properties_data and property_name not in ignore_properties:
+                new_value = self.format_property_value(property_setting=property_setting, value=properties_data.get(property_name))
+                
+                if len(convert_timezone) > 0 and property_setting.get("type") == "datetime" and properties_data.get(property_name):
+                    for suffix, timezone_name in convert_timezone.items():
+                        field_name_with_suffix = "{proterty_name}_{suffix}".format(proterty_name=property_name, suffix=suffix)
+                        if properties_data.get(property_name, "").find(".") != -1:
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                        else:
+                            properties_data[field_name_with_suffix] = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=utc).astimezone(timezone(timezone_name)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                            new_value = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+                properties_data[property_name] = new_value
+        return properties_data
