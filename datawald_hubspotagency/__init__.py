@@ -6,4 +6,4 @@ __author__ = "bibow"
 
 __all__ = ["datawald_hubspotagency"]
 from .hubspotagency import HubspotAgency
-from .hubspotagent import HubspotAgent
+from .hubspotagent import HubspotAgent, deploy
