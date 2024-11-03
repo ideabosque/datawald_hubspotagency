@@ -13,7 +13,7 @@ def deploy() -> list:
             "service": "DataWald",
             "class": "HubspotAgent",
             "functions": {
-                "stream_handle": {
+                "retrieve_entities_from_source": {
                     "is_static": False,
                     "label": "hubspotagency",
                     "mutation": [],
