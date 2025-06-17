@@ -118,14 +118,15 @@ class HubspotAgency(Agency):
         return person
     
     def tx_person_src_ext(self, raw_person, **kwargs):
-        if kwargs.get("tx_type") == "company":
+        hs_type = self.get_hs_type(kwargs.get("tx_type"))
+        if hs_type == "company":
             raw_person = self.process_hubspot_properties_values(
                 object_type="company",
                 properties_data=raw_person,
                 ignore_properties=[],
                 properties=self.setting.get("company_properties")
             )
-        elif kwargs.get("tx_type") == "contact":
+        elif hs_type == "contact":
             primary_company_id = self.hubspot_connector.get_contact_primary_company_id(raw_person["hs_object_id"])
             primary_company = None
             if primary_company_id:
@@ -164,7 +165,11 @@ class HubspotAgency(Agency):
     
     def tx_person_tgt(self, person):
         tx_type = person.get("tx_type_src_id").split("-")[0]
-        hubspot_properties = self.get_properties_can_be_processed(object_type=tx_type, properties=self.setting.get("contact_properties", None))
+        hs_type = self.get_hs_type(tx_type)
+        if hs_type == "contact":
+            hubspot_properties = self.get_properties_can_be_processed(object_type=tx_type, properties=self.setting.get("contact_properties", None))
+        elif hs_type == "company":
+            hubspot_properties = self.get_properties_can_be_processed(object_type=tx_type, properties=self.setting.get("company_properties", None))
         new_person = copy.deepcopy(person)
         for property_name, value in person["data"].items():
             if property_name not in hubspot_properties and property_name != "attachments":
@@ -194,12 +199,13 @@ class HubspotAgency(Agency):
     def insert_update_persons(self, persons):
         for person in persons:
             tx_type = person.get("tx_type_src_id").split("-")[0]
+            hs_type = self.get_hs_type(tx_type)
             try:
-                if tx_type == "contact":
+                if hs_type == "contact":
                     person["tgt_id"] = self.hubspot_connector.insert_update_contact(
                         person["data"], id_property=self.setting["id_property"][tx_type]
                     )
-                elif tx_type == "company":
+                elif hs_type == "company":
                     person["tgt_id"] = self.hubspot_connector.insert_update_company(
                         person["data"], id_property=self.setting["id_property"][tx_type]
                     )
@@ -223,8 +229,9 @@ class HubspotAgency(Agency):
     def insert_update_assets(self, assets):
         for asset in assets:
             tx_type = asset.get("tx_type_src_id").split("-")[0]
+            hs_type = self.get_hs_type(tx_type)
             try:
-                if tx_type == "product":
+                if hs_type == "product":
                     asset["tgt_id"] = self.hubspot_connector.insert_update_product(
                         asset["data"], id_property=self.setting["id_property"][tx_type]
                     )
@@ -372,3 +379,7 @@ class HubspotAgency(Agency):
                             new_value = datetime.strptime(properties_data.get(property_name), "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 properties_data[property_name] = new_value
         return properties_data
+
+    def get_hs_type(self, tx_type):
+        hs_types = self.setting.get("hs_types", {})
+        return hs_types.get(tx_type, tx_type)
