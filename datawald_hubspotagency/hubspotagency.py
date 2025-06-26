@@ -167,9 +167,9 @@ class HubspotAgency(Agency):
         tx_type = person.get("tx_type_src_id").split("-")[0]
         hs_type = self.get_hs_type(tx_type)
         if hs_type == "contact":
-            hubspot_properties = self.get_properties_can_be_processed(object_type=hs_type, properties=self.setting.get("contact_properties", None))
+            hubspot_properties = self.get_properties_can_be_processed(object_type=hs_type)
         elif hs_type == "company":
-            hubspot_properties = self.get_properties_can_be_processed(object_type=hs_type, properties=self.setting.get("company_properties", None))
+            hubspot_properties = self.get_properties_can_be_processed(object_type=hs_type)
         new_person = copy.deepcopy(person)
         for property_name, value in person["data"].items():
             if property_name not in hubspot_properties and property_name != "attachments":
