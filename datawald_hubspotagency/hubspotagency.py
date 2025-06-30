@@ -191,6 +191,12 @@ class HubspotAgency(Agency):
                         new_person["data"].pop(property_name)
                         self.logger.error(e)
                         pass
+                elif hubspot_properties[property_name].get("type") == "enumeration" and hubspot_properties[property_name].get("referenced_object_type") == "OWNER":
+                    owner = self.get_owner_by_name(value)
+                    if owner is not None:
+                        new_person["data"][property_name] = owner.id
+                    else:
+                        new_person["data"].pop(property_name)
         return new_person
 
     def tx_person_tgt_ext(self, new_person, person):
@@ -350,9 +356,9 @@ class HubspotAgency(Agency):
             return property_setting.get("options_mapping", {}).get(value, value)
         elif property_setting.get("type") == "number" and value:
             return float(value)
-        elif property_setting.get("type") == "enumeration" and property_setting.get("type") == "OWNER":
+        elif property_setting.get("type") == "enumeration" and property_setting.get("referenced_object_type") == "OWNER":
             return self.get_hubspot_user_name_by_id(value)
-        elif property_setting.get("type") == "number" and property_setting.get("type") == "COMPANY":
+        elif property_setting.get("type") == "number" and property_setting.get("referenced_object_type") == "COMPANY":
             company =  self.hubspot_connector.get_company(value)
             if company is not None:
                 return company.properties.get("name")
